@@ -1,0 +1,144 @@
+name: AniLot Build and Release IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['master']
+
+concurrency:
+  group: anilot-build
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26-intel
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+
+      # Если в корне репозитория лежит anilot-update.zip — распаковываем его поверх проекта
+      # и сохраняем изменения в репозиторий.
+      - name: Apply update zip (if present)
+        run: |
+          if [ -f anilot-update.zip ]; then
+            unzip -o anilot-update.zip
+            rm anilot-update.zip
+          fi
+
+      # Если архив обновления содержит одноразовый скрипт миграции .github/migrate-legacy.sh,
+      # выполняем его и удаляем: конечное дерево репозитория не должно содержать переходного кода.
+      # На уже мигрированном репозитории скрипта нет, шаг ничего не делает.
+      - name: Migrate legacy paths (one-time, if present)
+        run: |
+          if [ -f .github/migrate-legacy.sh ]; then
+            bash .github/migrate-legacy.sh
+            rm -f .github/migrate-legacy.sh
+          fi
+
+      # Если в корне лежит anilot-icon.png (квадрат, лучше 1024x1024) — делаем из него все размеры иконки.
+      - name: Generate app icon (if present)
+        run: |
+          if [ -f anilot-icon.png ]; then
+            python3 - <<'PY'
+          import json, subprocess
+          d = 'AniLot/Assets.xcassets/AppIcon.appiconset'
+          contents = json.load(open(d + '/Contents.json'))
+          for image in contents['images']:
+              name = image.get('filename')
+              if not name:
+                  continue
+              px = round(float(image['size'].split('x')[0]) * int(image['scale'].rstrip('x')))
+              subprocess.run(['sips', '-z', str(px), str(px), 'anilot-icon.png', '--out', d + '/' + name], check=True)
+              print('icon', name, px)
+          PY
+          fi
+
+      - name: Commit changes
+        if: github.ref_type == 'branch'
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "${GITHUB_ACTOR_ID}+${GITHUB_ACTOR}@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+
+          git commit -m "AniLot: apply update"
+
+          # Rebase onto the latest branch tip before pushing. Retry if the branch
+          # advances again between fetch and push; never force-push.
+          for attempt in 1 2 3; do
+            git fetch origin "$GITHUB_REF_NAME"
+            if ! git rebase "origin/$GITHUB_REF_NAME"; then
+              git rebase --abort || true
+              echo "::warning::Could not rebase update commit automatically."
+              exit 1
+            fi
+
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then
+              exit 0
+            fi
+            echo "Push attempt $attempt was rejected; retrying with the latest branch."
+          done
+
+          echo "::error::Could not push update after 3 attempts."
+          exit 1
+
+      # Сохраняем SHA фактического HEAD после применения обновлений и возможного коммита.
+      - name: Capture built commit SHA
+        id: built_commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # libtorrent-rasterbar.a слишком велика для обычного коммита: в репозитории хранятся
+      # сжатые архивы, распаковываем их в ожидаемое xcodeproj'ом место после коммита,
+      # чтобы распакованные файлы не попали в git.
+      - name: Extract libtorrent archives (if needed)
+        run: |
+          set -e
+          D=AniLot/Libraries/libtorrent/libtorrent.xcframework
+          if [ -d "$D" ] && [ ! -f "$D/ios-arm64/libtorrent-rasterbar.a" ]; then
+            gzip -dc "$D/ios-arm64/libtorrent-rasterbar.a.cpgz" > "$D/ios-arm64/libtorrent-rasterbar.a"
+            echo "extracted ios-arm64 libtorrent-rasterbar.a"
+          fi
+          if [ -d "$D" ] && [ ! -f "$D/ios-arm64_x86_64-simulator/libtorrent-rasterbar.a" ]; then
+            unzip -p "$D/ios-arm64_x86_64-simulator/libtorrent-rasterbar.a.zip" libtorrent-rasterbar.a > "$D/ios-arm64_x86_64-simulator/libtorrent-rasterbar.a"
+            echo "extracted simulator libtorrent-rasterbar.a"
+          fi
+
+      - name: Build (unsigned)
+        run: |
+          xcodebuild -project AniLot.xcodeproj \
+            -scheme AniLot \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            ONLY_ACTIVE_ARCH=NO BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+
+      - name: Package IPA
+        run: |
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -type d | head -n 1)
+          [ -z "$APP_PATH" ] && echo "app not found" && exit 1
+          mkdir Payload && cp -R "$APP_PATH" Payload/
+          zip -qr AniLot.ipa Payload
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: AniLot.ipa
+          path: AniLot.ipa
+
+      - name: Publish release
+        if: github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ format('build-{0}', github.run_number) }}
+          name: AniLot build ${{ github.run_number }}
+          target_commitish: ${{ steps.built_commit.outputs.sha }}
+          generate_release_notes: true
+          files: AniLot.ipa
+          make_latest: true

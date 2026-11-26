@@ -1,0 +1,8 @@
+xcuserdata/
+# libtorrent-rasterbar.a распаковывается в CI перед сборкой (см. .github/workflows/anilot.yml)
+/AniLot/Libraries/libtorrent/libtorrent.xcframework/ios-arm64/libtorrent-rasterbar.a
+/AniLot/Libraries/libtorrent/libtorrent.xcframework/ios-arm64_x86_64-simulator/libtorrent-rasterbar.a
+build/
+Payload/
+*.ipa
+.DS_Store
