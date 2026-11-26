@@ -418,8 +418,8 @@ AniLot/
 
 ### [AniLot v10](https://github.com/vilefex/AniLot/releases/tag/anilot-10)
 
-- Выполнена полная миграция репозитория: проект переименован в AniLot, структура и содержимое репозитория очищены.
-- Изменён Bundle ID приложения: `org.aateam.AniAnglia` → `org.aateam.AniLot`.
+- AniLot: полная миграция репозитория (переименование, чистка)
+- У приложения изменился bundle id (org.aateam.AniAnglia -> org.aateam.AniLot)
 
 ### [AniLot v9](https://github.com/vilefex/AniLot/releases/tag/anilot-9)
 
