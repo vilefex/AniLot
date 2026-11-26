@@ -50,8 +50,8 @@ AniLot не является официальным приложением Anixa
 | Тип проекта | Неофициальный экспериментальный клиент |
 | Основа | iOS-клиент Anixart |
 | Текущий номер версии в исходном коде | **v9** |
-| Xcode-проект | <code>AniAnglia.xcodeproj</code> |
-| Схема сборки | <code>iOSAnixart</code> |
+| Xcode-проект | <code>AniLot.xcodeproj</code> |
+| Схема сборки | <code>AniLot</code> |
 | Лицензия репозитория | MIT — см. <a href="LICENSE">LICENSE</a> |
 
 ---
@@ -252,7 +252,7 @@ anilot://shikimori
 - Git;
 - подключение к интернету для получения репозитория и зависимостей, если они необходимы при подготовке окружения.
 
-Основная реализация приложения находится в каталоге <code>AniAnglia/</code>, а проект Xcode — в <code>AniAnglia.xcodeproj</code>.
+Основная реализация приложения находится в каталоге <code>AniLot/</code>, а проект Xcode — в <code>AniLot.xcodeproj</code>.
 
 ### Получение исходного кода
 
@@ -264,17 +264,17 @@ cd AniLot
 Откройте проект:
 
 ~~~sh
-open AniAnglia.xcodeproj
+open AniLot.xcodeproj
 ~~~
 
-В Xcode выберите схему **iOSAnixart**, конфигурацию **Release** и подходящую цель сборки. Для установки на реальное устройство настройте параметры подписи в Xcode.
+В Xcode выберите схему **AniLot**, конфигурацию **Release** и подходящую цель сборки. Для установки на реальное устройство настройте параметры подписи в Xcode.
 
 ### Сборка через командную строку
 
 Текущий GitHub Actions workflow использует следующую команду:
 
 ~~~sh
-xcodebuild -project AniAnglia.xcodeproj -scheme iOSAnixart -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ONLY_ACTIVE_ARCH=NO BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+xcodebuild -project AniLot.xcodeproj -scheme AniLot -configuration Release -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ONLY_ACTIVE_ARCH=NO BUILD_LIBRARY_FOR_DISTRIBUTION=YES
 ~~~
 
 Эта команда создаёт сборку приложения для iOS без кодовой подписи. Результат <code>.app</code> находится внутри:
@@ -305,14 +305,41 @@ build/Build/Products/Release-iphoneos/
 1. GitHub Actions поднимает runner <code>macos-26-intel</code>.
 2. Репозиторий загружается с помощью <code>actions/checkout</code>.
 3. При наличии <code>anilot-update.zip</code> в корне архива изменения распаковываются поверх проекта.
-4. При наличии <code>anilot-icon.png</code> генерируются размеры иконки для <code>AppIcon.appiconset</code>.
-5. На ветке выполняется фиксация подготовленных изменений, если они появились.
-6. Xcode собирает схему <code>iOSAnixart</code> в конфигурации <code>Release</code>.
-7. Приложение упаковывается в <code>AniLot.ipa</code>.
-8. IPA загружается как артефакт workflow.
-9. При сборке ветки <code>master</code> создаётся или обновляется GitHub Release с полученной IPA.
+4. При наличии в архиве одноразового скрипта <code>.github/migrate-legacy.sh</code> он выполняется и удаляется: недостающие файлы переносятся в новое дерево, устаревшие пути и файлы, которых нет в актуальной версии проекта, удаляются. На уже мигрированном репозитории шаг ничего не делает.
+5. При наличии <code>anilot-icon.png</code> генерируются размеры иконки для <code>AppIcon.appiconset</code>.
+6. На ветке выполняется фиксация подготовленных изменений, если они появились.
+7. Архивы библиотеки libtorrent (<code>libtorrent-rasterbar.a.cpgz</code> и <code>libtorrent-rasterbar.a.zip</code>) распаковываются в место, ожидаемое проектом Xcode. Распакованные файлы игнорируются Git и не попадают в репозиторий.
+8. Xcode собирает схему <code>AniLot</code> в конфигурации <code>Release</code>.
+9. Приложение упаковывается в <code>AniLot.ipa</code>.
+10. IPA загружается как артефакт workflow.
+11. При сборке ветки <code>master</code> создаётся или обновляется GitHub Release с полученной IPA.
 
 Сборки сериализованы через механизм <code>concurrency</code>, чтобы параллельные запуски не перезаписывали изменения друг друга.
+
+### Как применить anilot-update.zip
+
+Workflow применяет архив **поверх** текущего репозитория: файлы из архива перезаписывают файлы на диске, но ничего не удаляется автоматически. Поэтому архив содержит одноразовый скрипт миграции <code>.github/migrate-legacy.sh</code>: он переносит недостающие файлы (фреймворки, ресурсы) в новое дерево, чистит устаревшие пути и самоудаляется. На уже мигрированном репозитории скрипта нет, шаг миграции ничего не делает.
+
+**Вариант 1 — локально, одной сборкой (рекомендуется, если есть git и репозиторий склонирован):**
+
+~~~sh
+unzip -o anilot-update.zip
+bash .github/migrate-legacy.sh
+rm -f .github/migrate-legacy.sh
+git add -A
+git commit -m "AniLot: apply update"
+git push origin master
+~~~
+
+CI выполнит сборку уже обновлённого проекта и опубликует релиз. Скрипт миграции перенесёт недостающие файлы (фреймворки, ресурсы) в новое дерево, удалит устаревшие пути и самоудалится. На время миграции потребуется до ~1 ГБ свободного места на диске (копирование фреймворков).
+
+**Вариант 2 — только через GitHub (без локального git):**
+
+1. Загрузите <code>anilot-update.zip</code> в корень репозитория и закоммитьте его (например, через веб-интерфейс GitHub).
+2. Дождитесь первого запуска workflow. Он распакует архив и зафиксирует обновлённые файлы; сборка на этом запуске пройдёт ещё по прежним путям (выполняется прежняя версия workflow) и может опубликовать устаревший черновой релиз — это ожидаемо.
+3. Нажмите **Run workflow** на странице [Actions](https://github.com/vilefex/AniLot/actions/workflows/anilot.yml) для повторного запуска. Новый workflow выполнит миграцию (скрипт перенесёт недостающие файлы в новое дерево, удалит устаревшие пути и сам удалится из репозитория), соберёт схему <code>AniLot</code> и опубликует актуальный релиз, который станет «latest».
+
+Если репозиторий уже мигрирован, скрипт миграции в дереве отсутствует, шаг миграции ничего не делает и повторный запуск не потребуется.
 
 ### Где искать результат
 
@@ -334,18 +361,23 @@ AniLot/
 ├── .github/
 │   └── workflows/
 │       └── anilot.yml              # Автоматическая сборка и публикация IPA
-├── AniAnglia/
+├── AniLot/
+│   ├── Auth/                       # Авторизация и восстановление доступа
 │   ├── Common/                     # Общие компоненты приложения
-│   ├── Main/                       # Основные экраны, профили и настройки
+│   ├── Core/                       # Точка входа, делегаты приложения и окно
+│   ├── Main/                       # Основные экраны, поиск и настройки
+│   ├── Profiles/                   # Профили пользователей
 │   ├── Releases/                   # Страницы релизов, эпизоды и видеоплеер
 │   ├── Misc/                       # Вспомогательные модули и интеграции
 │   │   ├── AniLotSubtitles.h/.mm   # Парсинг и работа с субтитрами
 │   │   ├── AniLotVersion.h/.mm     # Номер версии и проверка обновлений
 │   │   └── ShikimoriSync.h/.mm     # Синхронизация с Shikimori
+│   ├── Libraries/                  # Сторонние библиотеки и фреймворки
 │   └── Info.plist                  # Конфигурация приложения
-├── AniAnglia.xcodeproj/            # Проект Xcode
+├── AniLot.xcodeproj/               # Проект Xcode
 ├── repo/
 │   └── app_icon.jpg                # Иконка для страницы репозитория
+├── anilot-icon.png                 # Исходник иконки приложения для CI
 ├── LICENSE
 └── README.md
 ~~~
